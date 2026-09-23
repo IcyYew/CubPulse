@@ -6,64 +6,89 @@ import (
 	"io"
 	"errors"
 	"encoding/json"
-	"github.com/joho/godotenv"
-	"log"
+	"strconv"
+	"time"
 )
 
-type AppIDResponse struct {
-	Success string `json:"success"`
+type AppIDResponse map[string]struct {
+	Success bool `json:"success"`
+	Data struct {
+		Name string `json:"name"`
+	}
 }
 
-func IsValidSteamAppID(appid int) (int, error) {
+type PlayerCountResponse struct {
+	Response struct {
+		Playercount int `json:"player_count"`
+		Result int `json:"result"`
+	} `json:"response"`
+}
+
+var steamClient = &http.Client{
+	Timeout: 5 * time.Second,
+}
+// Checks if appid a valid Steam appid, returns appid and app name
+func IsValidSteamAppID(appid int) (int, string, error) {
 	url := fmt.Sprintf("http://store.steampowered.com/api/appdetails?appids=%v", appid)
-	res, err := http.Get(url)
+	res, err := steamClient.Get(url)
 	if err != nil {
-		return -1, err
+		return -1, "", err
 	}
-	var success AppIDResponse
+	var appIDResponse AppIDResponse
 	defer res.Body.Close()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return -1, err
+		return -1, "", err
 	}
 
-	if err := json.Unmarshal(body, &success); err != nil {
-		return -1, err
+	if err := json.Unmarshal(body, &appIDResponse); err != nil {
+		return -1, "", err
 	}
-	if success.Success == "false" {
-		return -1, errors.New("Not valid steam app id")
+
+	if value, exists := appIDResponse[strconv.Itoa(appid)]; exists {
+		if value.Success {
+			return appid, value.Data.Name, nil
+		} else {
+			return -1, "", errors.New("AppID exists, but not valid ID")
+		}
+	} else {
+		return -1, "", errors.New("Bad Steam response for AppID")
 	}
-	return appid, nil
 }
 
-func GetCurrentPlayerCount(appid int) (string, error) {
+func GetCurrentPlayerCount(appid int) (int, error) {
 	url := fmt.Sprintf("https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=%v", appid)
-	res, err := http.Get(url)
+	res, err := steamClient.Get(url)
 	if err != nil {
-		return "", err
+		return -1, err
 	}
+	var playercount PlayerCountResponse
 	defer res.Body.Close()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return "", err
+		return -1, err
 	}
-	return string(body), nil
+	if err := json.Unmarshal(body, &playercount); err != nil {
+		return -1, err
+	}
+
+	if playercount.Response.Result > 0 {
+		return playercount.Response.Playercount, nil
+	} else {
+		return -1, errors.New("Steam returned bad result for AppID")
+	}
 }
 
 
 func main() {
 
-	appid, err := IsValidSteamAppID(440)
+	appid, appname, err := IsValidSteamAppID(440)
 	if err != nil {
 		fmt.Printf("Invalid Steam app id: %v", appid)
 	}
-	err = godotenv.Load()
-	if err != nil {
-		log.Fatal("Err loading .env file")
-	}
 
-	fmt.Printf("Valid steam app id: %v", appid)
+	//fmt.Printf("Valid steam app id: %v\n", appid)
 
 	playercountbody, err := GetCurrentPlayerCount(appid)
-	fmt.Printf("%s", playercountbody)
+	fmt.Printf("%v players currently playing %s\n", playercountbody, appname)
 }
