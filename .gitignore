@@ -1,0 +1,16 @@
+# Secrets & Config
+.env
+.env.*
+
+
+# Builds
+/bin/
+dist/
+*.exe
+*.out
+
+# Test Artifacts
+coverage.out
+*.cover
+
+
