@@ -30,6 +30,13 @@ type PlayerCountResponse struct {
 	} `json:"response"`
 }
 
+type Sample struct {
+	Appid int `db:"appid"`
+	SampledAt time.Time `db:"sampled_at"`
+	PlayerCount int `db:"player_count"`
+}
+
+
 var steamClient = &http.Client{
 	Timeout: 5 * time.Second,
 }
@@ -107,6 +114,7 @@ func main() {
 	}
 	defer conn.Close(context.Background())
 	var appname string
+	var samples []Sample 
 	appid := 440
 	err = conn.QueryRow(context.Background(), "SELECT app_name FROM steam_apps WHERE appid=$1", appid).Scan(&appname)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -129,5 +137,42 @@ func main() {
 	}
 
 	playercountbody, err := GetCurrentPlayerCount(appid)
-	fmt.Printf("%v players currently playing %s\n", playercountbody, appname)
+	if err != nil {
+		log.Fatal("Failed to read player count")
+	}
+	_, err = conn.Exec(
+		context.Background(),
+		"INSERT INTO app_samples (appid, player_count) VALUES ($1, $2)",
+		appid,
+		playercountbody,
+	)
+	if err != nil {
+		log.Fatal("Failed to write into app_samples")
+	} 
+	rows, err := conn.Query(context.Background(), "SELECT appid, sampled_at, player_count FROM app_samples WHERE appid = $1 ORDER BY sampled_at", appid)
+	if err != nil{
+		// should be impossible to reach in current implementation, since insertion of new sample is hardcoded to happen before this
+		fmt.Printf("No samples found for appid: %v\n", appid)
+	} 
+	defer rows.Close()
+
+	for rows.Next() {
+		var sample Sample
+		err = rows.Scan(
+			&sample.Appid, 
+			&sample.SampledAt, 
+			&sample.PlayerCount,
+		)
+		if err != nil {
+			log.Fatal("Row failed to scan")
+		}
+		samples = append(samples, sample)
+	}
+	if rows.Err() != nil {
+		log.Fatal("Lookup failure")
+	}
+
+	for i := 0; i < len(samples); i++ {
+		fmt.Println(samples[i])
+	}
 }
