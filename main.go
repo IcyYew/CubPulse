@@ -38,24 +38,25 @@ func IsValidSteamAppID(appid int) (string, error) {
 	url := fmt.Sprintf("http://store.steampowered.com/api/appdetails?appids=%v", appid)
 	res, err := steamClient.Get(url)
 	if err != nil {
-		fmt.Println("Failed to fetch from endpoint")
 		return "", err
 	}
 	var appIDResponse AppIDResponse
 	defer res.Body.Close()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		fmt.Println("Failed to parse response body")
+		//fmt.Println("Failed to parse response body")
 		return "", err
 	}
-	fmt.Println("status:", res.StatusCode)
-	fmt.Println("body:", string(body))
+	//fmt.Println("status:", res.StatusCode)
+	//fmt.Println("body:", string(body))
 
 	if err := json.Unmarshal(body, &appIDResponse); err != nil {
-		fmt.Println("Failed to unmarshal body")
+		//fmt.Println("Failed to unmarshal body")
 		return "", err
 	}
 
+	// iterate through response entries, looking for an appid match, this is needed for edge case weirdness,
+	// like the struct comment where we have response keyed on DLC rather than appid
 	for _, value := range appIDResponse {
 		if value.Data.Appid == appid {
 			if value.Success {
@@ -70,6 +71,7 @@ func IsValidSteamAppID(appid int) (string, error) {
 
 }
 
+// hits official web api for a games player count
 func GetCurrentPlayerCount(appid int) (int, error) {
 	url := fmt.Sprintf("https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=%v", appid)
 	res, err := steamClient.Get(url)
@@ -99,7 +101,6 @@ func main() {
 	if err != nil {
 		log.Fatal("Error loading .env")
 	}
-
 	conn, err := pgx.Connect(context.Background(), os.Getenv("DB_URL"))
 	if err != nil {
 		log.Fatal("Error loading DB")
@@ -109,7 +110,7 @@ func main() {
 	appid := 440
 	err = conn.QueryRow(context.Background(), "SELECT app_name FROM steam_apps WHERE appid=$1", appid).Scan(&appname)
 	if errors.Is(err, pgx.ErrNoRows) {
-		fmt.Println("App id not found in cache")
+		//fmt.Println("App id not found in cache")
 		appname, err = IsValidSteamAppID(appid)
 		if err != nil {
 			log.Fatal("Invalid app id")
