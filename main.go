@@ -125,7 +125,7 @@ func run(ctx context.Context) error {
 	}
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
-		cancel()
+		defer cancel()
 		conn.Close(cleanupCtx)
 	}()
 	ticker := time.NewTicker(10 * time.Second)
@@ -151,13 +151,14 @@ func run(ctx context.Context) error {
 	} else if err != nil {
 		return err
 	}
-	currentRetries := 1
+	failureCounter := 1
 	for {
 		select {
 		case <-ticker.C:
 			playercountbody, err := GetCurrentPlayerCount(ctx, appid)
 			if err != nil {
-				log.Printf("Player count fetch failure %d", currentRetries)
+				log.Printf("Player count fetch failure %d", failureCounter)
+				failureCounter++
 				continue
 			}
 			_, err = conn.Exec(
