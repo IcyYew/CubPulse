@@ -43,9 +43,14 @@ var steamClient = &http.Client{
 	Timeout: 5 * time.Second,
 }
 // Checks if appid a valid Steam appid, returns appname 
-func IsValidSteamAppID(appid int) (string, error) {
+func IsValidSteamAppID(ctx context.Context, appid int) (string, error) {
 	url := fmt.Sprintf("http://store.steampowered.com/api/appdetails?appids=%v", appid)
-	res, err := steamClient.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req = req.WithContext(ctx)
+	res, err := steamClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -81,9 +86,14 @@ func IsValidSteamAppID(appid int) (string, error) {
 }
 
 // hits official web api for a games player count
-func GetCurrentPlayerCount(appid int) (int, error) {
+func GetCurrentPlayerCount(ctx context.Context, appid int) (int, error) {
 	url := fmt.Sprintf("https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=%v", appid)
-	res, err := steamClient.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return -1, err
+	}
+	req = req.WithContext(ctx)
+	res, err := steamClient.Do(req)
 	if err != nil {
 		return -1, err
 	}
@@ -115,8 +125,8 @@ func run(ctx context.Context) error {
 	}
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
-		defer cancel()
-		defer conn.Close(cleanupCtx)
+		cancel()
+		conn.Close(cleanupCtx)
 	}()
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -125,7 +135,7 @@ func run(ctx context.Context) error {
 	appid := 440
 	err = conn.QueryRow(ctx, "Select app_name FROM steam_apps WHERE appid=$1", appid).Scan(&appname)
 	if errors.Is(err, pgx.ErrNoRows) {
-		appname, err = IsValidSteamAppID(appid)
+		appname, err = IsValidSteamAppID(ctx, appid)
 		if err != nil {
 			return err
 		}
@@ -141,12 +151,14 @@ func run(ctx context.Context) error {
 	} else if err != nil {
 		return err
 	}
+	currentRetries := 1
 	for {
 		select {
 		case <-ticker.C:
-			playercountbody, err := GetCurrentPlayerCount(appid)
+			playercountbody, err := GetCurrentPlayerCount(ctx, appid)
 			if err != nil {
-				return err
+				log.Printf("Player count fetch failure %d", currentRetries)
+				continue
 			}
 			_, err = conn.Exec(
 				ctx,
@@ -190,7 +202,6 @@ func run(ctx context.Context) error {
 			return nil 
 		}
 	}
-	return nil
 }
 
 func main() {
