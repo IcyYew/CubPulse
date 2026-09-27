@@ -13,6 +13,8 @@ import (
 	"os"
 	"github.com/joho/godotenv"
 	"context"
+	"os/signal"
+	"syscall"
 )
 
 type AppIDResponse map[string]struct {
@@ -102,57 +104,53 @@ func GetCurrentPlayerCount(appid int) (int, error) {
 	}
 }
 
-
-func main() {
+func run(ctx context.Context) error {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env")
+		return err
 	}
-	conn, err := pgx.Connect(context.Background(), os.Getenv("DB_URL"))
+	conn, err := pgx.Connect(ctx, os.Getenv("DB_URL"))
 	if err != nil {
-		log.Fatal("Error loading DB")
+		return err
 	}
-	defer conn.Close(context.Background())
+	defer conn.Close(ctx)
 	var appname string
-	var samples []Sample 
+	var samples []Sample
 	appid := 440
-	err = conn.QueryRow(context.Background(), "SELECT app_name FROM steam_apps WHERE appid=$1", appid).Scan(&appname)
+	err = conn.QueryRow(ctx, "Select app_name FROM steam_apps WHERE appid=$1", appid).Scan(&appname)
 	if errors.Is(err, pgx.ErrNoRows) {
-		//fmt.Println("App id not found in cache")
 		appname, err = IsValidSteamAppID(appid)
 		if err != nil {
-			log.Fatal("Invalid app id")
+			return err
 		}
 		_, err = conn.Exec(
-			context.Background(), 
+			ctx,
 			"INSERT INTO steam_apps (appid, app_name) VALUES ($1, $2)",
 			appid,
 			appname,
 		)
-		if err != nil   {
-			log.Fatal("Failed to write into steam_apps table")
+		if err != nil {
+			return err
 		}
 	} else if err != nil {
-		log.Fatal("DB failure, unclassified")
+		return err
 	}
-
 	playercountbody, err := GetCurrentPlayerCount(appid)
 	if err != nil {
-		log.Fatal("Failed to read player count")
+		return err
 	}
 	_, err = conn.Exec(
-		context.Background(),
+		ctx,
 		"INSERT INTO app_samples (appid, player_count) VALUES ($1, $2)",
 		appid,
 		playercountbody,
 	)
 	if err != nil {
-		log.Fatal("Failed to write into app_samples")
+		return err
 	} 
-	rows, err := conn.Query(context.Background(), "SELECT appid, sampled_at, player_count FROM app_samples WHERE appid = $1 ORDER BY sampled_at", appid)
-	if err != nil{
-		// should be impossible to reach in current implementation, since insertion of new sample is hardcoded to happen before this
-		fmt.Printf("No samples found for appid: %v\n", appid)
+	rows, err := conn.Query(ctx, "SELECT appid, sampled_at, player_count FROM app_samples WHERE appid = $1 ORDER BY sampled_at", appid)
+	if err != nil {
+		return err
 	} 
 	defer rows.Close()
 
@@ -164,15 +162,24 @@ func main() {
 			&sample.PlayerCount,
 		)
 		if err != nil {
-			log.Fatal("Row failed to scan")
+			return err
 		}
 		samples = append(samples, sample)
 	}
 	if rows.Err() != nil {
-		log.Fatal("Lookup failure")
+		return err
 	}
 
 	for i := 0; i < len(samples); i++ {
 		fmt.Println(samples[i])
+	}
+	return nil
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx); err != nil {
+		log.Printf("%v", err)
 	}
 }
