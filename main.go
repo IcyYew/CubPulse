@@ -113,7 +113,13 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(ctx)
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+		defer cancel()
+		defer conn.Close(cleanupCtx)
+	}()
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 	var appname string
 	var samples []Sample
 	appid := 440
@@ -135,43 +141,54 @@ func run(ctx context.Context) error {
 	} else if err != nil {
 		return err
 	}
-	playercountbody, err := GetCurrentPlayerCount(appid)
-	if err != nil {
-		return err
-	}
-	_, err = conn.Exec(
-		ctx,
-		"INSERT INTO app_samples (appid, player_count) VALUES ($1, $2)",
-		appid,
-		playercountbody,
-	)
-	if err != nil {
-		return err
-	} 
-	rows, err := conn.Query(ctx, "SELECT appid, sampled_at, player_count FROM app_samples WHERE appid = $1 ORDER BY sampled_at", appid)
-	if err != nil {
-		return err
-	} 
-	defer rows.Close()
+	for {
+		select {
+		case <-ticker.C:
+			playercountbody, err := GetCurrentPlayerCount(appid)
+			if err != nil {
+				return err
+			}
+			_, err = conn.Exec(
+				ctx,
+				"INSERT INTO app_samples (appid, player_count) VALUES ($1, $2)",
+				appid,
+				playercountbody,
+			)
+			if err != nil {
+				return err
+			}
+			fmt.Println("Sample inserted.")
+		case <-ctx.Done():
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+			defer cancel()
+			rows, err := conn.Query(shutdownCtx, "SELECT appid, sampled_at, player_count FROM app_samples WHERE appid = $1 ORDER BY sampled_at", appid)
+			if err != nil {
+				return err
+			} 
+			defer rows.Close()
 
-	for rows.Next() {
-		var sample Sample
-		err = rows.Scan(
-			&sample.Appid, 
-			&sample.SampledAt, 
-			&sample.PlayerCount,
-		)
-		if err != nil {
-			return err
+			for rows.Next() {
+				var sample Sample
+				err = rows.Scan(
+					&sample.Appid, 
+					&sample.SampledAt, 
+					&sample.PlayerCount,
+				)
+				if err != nil {
+					return err
+				}
+				samples = append(samples, sample)
+			}
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			fmt.Println("Samples: ")
+
+			for i := 0; i < len(samples); i++ {
+				fmt.Println(samples[i])
+			}
+			return nil 
 		}
-		samples = append(samples, sample)
-	}
-	if rows.Err() != nil {
-		return err
-	}
-
-	for i := 0; i < len(samples); i++ {
-		fmt.Println(samples[i])
 	}
 	return nil
 }
