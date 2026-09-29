@@ -1,6 +1,6 @@
 module cubstack.dev/cubpulse
 
-go 1.25.0
+go 1.25
 
 require github.com/jackc/pgx/v5 v5.11.0
 

@@ -13,4 +13,6 @@ dist/
 coverage.out
 *.cover
 
-
+# Local Development Helpers
+*.sh
+scripts

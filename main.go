@@ -115,11 +115,9 @@ func GetCurrentPlayerCount(ctx context.Context, appid int) (int, error) {
 }
 
 func run(ctx context.Context) error {
-	err := godotenv.Load()
-	if err != nil {
-		return err
-	}
-	conn, err := pgx.Connect(ctx, os.Getenv("DB_URL"))
+	_ = godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	conn, err := pgx.Connect(ctx, dbURL) 
 	if err != nil {
 		return err
 	}
